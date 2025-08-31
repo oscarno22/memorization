@@ -205,3 +205,18 @@ class MarginalTrainer(BaseTrainer):
 
         log_px = -torch.log(torch.tensor(float(N))) + torch.logsumexp(v, 0)
         return log_px
+
+
+class FlowTrainer(MarginalTrainer):
+    """Trainer specifically for normalizing flow models"""
+    
+    def marginal_batch(
+        self, model: BaseModel, batch: torch.Tensor, N: int = 256
+    ) -> torch.Tensor:
+        """For flow models, marginal likelihood is directly available"""
+        if hasattr(model, 'log_prob'):
+            # Flow model - direct log probability
+            return model.log_prob(batch)
+        else:
+            # Fall back to VAE method
+            return super().marginal_batch(model, batch, N)

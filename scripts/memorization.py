@@ -28,7 +28,7 @@ from dataset import KNOWN_DATASETS
 from models import BaseModel
 from models import MODELS
 from models import load_model
-from trainer import MarginalTrainer
+from trainer import MarginalTrainer, FlowTrainer
 
 
 def parse_args():
@@ -266,12 +266,21 @@ def run_full(
             ),
         )
 
-        trainer = MarginalTrainer(
-            epochs=metadata["epochs"],
-            lr=metadata["learning_rate"],
-            checkpoint_func=chkp_func,
-            params=metadata["trainer_params"],
-        )
+        # Choose appropriate trainer based on model type
+        if model_name == "SimpleRealNVP":
+            trainer = FlowTrainer(
+                epochs=metadata["epochs"],
+                lr=metadata["learning_rate"],
+                checkpoint_func=chkp_func,
+                params=metadata["trainer_params"],
+            )
+        else:
+            trainer = MarginalTrainer(
+                epochs=metadata["epochs"],
+                lr=metadata["learning_rate"],
+                checkpoint_func=chkp_func,
+                params=metadata["trainer_params"],
+            )
         in_loader = dataset.create_full()
         test_loader = dataset.create_full_test()
         logpxs, losses = trainer.fit(
@@ -346,13 +355,21 @@ def run_split_cv(
                 ),
             )
 
-            # Instantiate trainer
-            trainer = MarginalTrainer(
-                epochs=metadata["epochs"],
-                lr=metadata["learning_rate"],
-                checkpoint_func=chkp_func,
-                params=metadata["trainer_params"],
-            )
+            # Instantiate trainer based on model type
+            if model_name == "SimpleRealNVP":
+                trainer = FlowTrainer(
+                    epochs=metadata["epochs"],
+                    lr=metadata["learning_rate"],
+                    checkpoint_func=chkp_func,
+                    params=metadata["trainer_params"],
+                )
+            else:
+                trainer = MarginalTrainer(
+                    epochs=metadata["epochs"],
+                    lr=metadata["learning_rate"],
+                    checkpoint_func=chkp_func,
+                    params=metadata["trainer_params"],
+                )
 
             # Train the model
             logpxs, losses = trainer.fit(
