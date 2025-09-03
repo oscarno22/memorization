@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Generate figure showing the distribution of memorization values for models 
+Generate figure showing the distribution of memorization values for models
 trained with two different learning rates.
 
 Author: G.J.J. van den Burg
@@ -34,14 +34,89 @@ def parse_args():
     parser.add_argument(
         "-o", "--output", help="Output file to write to (.tex)", required=True
     )
+    parser.add_argument(
+        "--use-percentiles",
+        action="store_true",
+        help="Use 1st-99th percentiles for axis limits instead of min-max (useful for outliers)",
+    )
+    parser.add_argument(
+        "--log-scale",
+        action="store_true",
+        help="Use log scale for x-axis (adds small constant to handle negative values)",
+    )
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize data by subtracting mean and dividing by std",
+    )
     return parser.parse_args()
 
 
-def make_tex(M3, M4):
+def make_tex(M3, M4, use_percentiles=False, log_scale=False, normalize=False):
     m3 = M3[:, -1]
     m4 = M4[:, -1]
     assert len(m3) == len(m4) == 60_000
     del M3, M4
+
+    # Apply data transformations
+    if normalize:
+        # Combine data for global normalization
+        all_data = np.concatenate([m3, m4])
+        mean_val = np.mean(all_data)
+        std_val = np.std(all_data)
+        m3 = (m3 - mean_val) / std_val
+        m4 = (m4 - mean_val) / std_val
+        print(f"Normalized data with mean={mean_val:.3f}, std={std_val:.3f}")
+
+    if log_scale:
+        # Shift data to make all values positive, then take log
+        all_data = np.concatenate([m3, m4])
+        min_val = np.min(all_data)
+        shift = abs(min_val) + 1 if min_val <= 0 else 0
+        m3 = np.log(m3 + shift + 1e-8)
+        m4 = np.log(m4 + shift + 1e-8)
+        print(f"Applied log scale with shift={shift:.3f}")
+
+    # Calculate data-driven axis limits
+    all_data = np.concatenate([m3, m4])
+    data_min = np.min(all_data)
+    data_max = np.max(all_data)
+    data_range = data_max - data_min
+
+    if use_percentiles:
+        # Use percentiles to handle outliers
+        p1, p99 = np.percentile(all_data, [1, 99])
+        range_99 = p99 - p1
+        padding_99 = 0.1 * range_99
+        xmin = p1 - padding_99
+        xmax = p99 + padding_99
+        print(f"Using percentile-based range: [{p1:.2f}, {p99:.2f}]")
+    else:
+        # Add some padding (10% on each side)
+        padding = 0.1 * data_range
+        xmin = data_min - padding
+        xmax = data_max + padding
+
+        # For very large ranges, automatically switch to percentiles
+        if data_range > 100:
+            p1, p99 = np.percentile(all_data, [1, 99])
+            range_99 = p99 - p1
+            padding_99 = 0.1 * range_99
+            xmin = p1 - padding_99
+            xmax = p99 + padding_99
+            print(f"Large range detected, using percentiles: [{p1:.2f}, {p99:.2f}]")
+
+    print(f"Data range: [{data_min:.2f}, {data_max:.2f}]")
+    print(f"Plot range: [{xmin:.2f}, {xmax:.2f}]")
+
+    # Adjust xlabel based on transformations
+    xlabel = "Memorization score"
+    if normalize and log_scale:
+        xlabel = "Log(normalized memorization score)"
+    elif normalize:
+        xlabel = "Normalized memorization score"
+    elif log_scale:
+        xlabel = "Log(memorization score)"
 
     tex = []
 
@@ -74,8 +149,6 @@ def make_tex(M3, M4):
 
     fontsize = "\\normalsize"
     bins = 100
-    xmin = -15
-    xmax = 35
     ymin = 0
     ymax = 0.12
 
@@ -85,7 +158,7 @@ def make_tex(M3, M4):
         "ymin": ymin,
         "ymax": ymax,
         "scale only axis": None,
-        "xlabel": "Memorization score",
+        "xlabel": xlabel,
         "ylabel": "Density",
         "width": "6cm",
         "height": "8cm",
@@ -137,20 +210,21 @@ def make_tex(M3, M4):
         line_plot_opts["draw"] = color
         vert_plot_opts["draw"] = color
 
-        tex.append(
-            f"\\addplot [{dict2tex(hist_plot_opts)}] table[y index=0] {{%"
-        )
+        tex.append(f"\\addplot [{dict2tex(hist_plot_opts)}] table[y index=0] {{%")
         tex.append("data")
         for v in m:
             tex.append(str(v.item()))
         tex.append("};")
 
-        f = Fitter(
-            m, distributions=["johnsonsu"], xmin=xmin, xmax=xmax, bins=bins
-        )
+        f = Fitter(m, distributions=["johnsonsu"], xmin=xmin, xmax=xmax, bins=bins)
         f.fit()
         params = f.get_best()
-        a, b, loc, scale = params["johnsonsu"]["a"], params["johnsonsu"]["b"], params["johnsonsu"]["loc"], params["johnsonsu"]["scale"]
+        a, b, loc, scale = (
+            params["johnsonsu"]["a"],
+            params["johnsonsu"]["b"],
+            params["johnsonsu"]["loc"],
+            params["johnsonsu"]["scale"],
+        )
 
         tex.append(f"\\addplot [{dict2tex(line_plot_opts)}] {{%")
         tex.append(f"johnsonsu(x, {a}, {b}, {loc}, {scale})")
@@ -158,9 +232,7 @@ def make_tex(M3, M4):
         tex.append(f"\\addlegendentry{{{label}}}")
 
         tex.append(f"\\addplot [{dict2tex(vert_plot_opts)}] coordinates {{%")
-        tex.append(
-            f"({np.quantile(m, 0.95)}, {ymin}) ({np.quantile(m, 0.95)}, {ymax})"
-        )
+        tex.append(f"({np.quantile(m, 0.95)}, {ymin}) ({np.quantile(m, 0.95)}, {ymax})")
         tex.append("};")
 
     tex.append("\\end{axis}")
@@ -178,7 +250,7 @@ def main():
     M3 = bmnist3["M"]
     M4 = bmnist4["M"]
 
-    tex = make_tex(M3, M4)
+    tex = make_tex(M3, M4, args.use_percentiles, args.log_scale, args.normalize)
     with open(args.output, "w") as fp:
         fp.write("\n".join(tex))
 

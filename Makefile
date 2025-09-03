@@ -41,7 +41,7 @@ MEM_FILES=\
 
 .PHONY: all
 
-all: memorization flow_lr_comparison summaries analysis
+all: memorization flow_lr_comparison summaries analysis flow_analysis
 
 ############################
 #                          #
@@ -49,13 +49,18 @@ all: memorization flow_lr_comparison summaries analysis
 #                          #
 ############################
 
-.PHONY: memorization
+.PHONY: memorization memorization_no_celeba
 
 memorization: \
 	mem_mnist_lr3 \
 	mem_mnist_lr4 \
 	mem_cifar10 \
 	mem_celeba
+
+memorization_no_celeba: \
+	mem_mnist_lr3 \
+	mem_mnist_lr4 \
+	mem_cifar10
 
 ############################
 # BinarizedMNIST lr = 1e-3 #
@@ -313,6 +318,32 @@ $(CELEBA_FULL_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
 		--checkpoint-dir $(CKPT_DIR_CELEBA)
 
 
+##############
+# SUMMARIES  #
+##############
+
+# Create summary directory if it doesn't exist
+summary-dir:
+	mkdir -p $(SUMMARY_DIR)
+
+# VAE summarization targets
+$(SUMMARY_DIR)/mem_mnist_lr3.npz: $(SCRIPT_DIR)/summarize.py \
+	$(BMNIST_LR3_CV_TARGETS) | summary-dir
+	python $< -o $@ --result-files $(BMNIST_LR3_CV_TARGETS)
+
+$(SUMMARY_DIR)/mem_mnist_lr4.npz: $(SCRIPT_DIR)/summarize.py \
+	$(BMNIST_LR4_CV_TARGETS) | summary-dir
+	python $< -o $@ --result-files $(BMNIST_LR4_CV_TARGETS)
+
+$(SUMMARY_DIR)/mem_cifar10.npz: $(SCRIPT_DIR)/summarize.py \
+	$(CIFAR10_CV_TARGETS) | summary-dir
+	python $< -o $@ --result-files $(CIFAR10_CV_TARGETS)
+
+$(SUMMARY_DIR)/mem_celeba.npz: $(SCRIPT_DIR)/summarize.py \
+	$(CELEBA_CV_TARGETS) | summary-dir
+	python $< -o $@ --result-files $(CELEBA_CV_TARGETS)
+
+
 ##################################
 # Flow Learning Rate Comparison  #
 ##################################
@@ -460,14 +491,33 @@ $(SUMMARY_DIR)/mem_flow_bmnist_lr4.npz: $(SCRIPT_DIR)/summarize.py \
 	$(FLOW_BMNIST_LR4_CV_TARGETS) | summary-dir
 	python $< -o $@ --result-files $(FLOW_BMNIST_LR4_CV_TARGETS)
 
-# Analysis targets for flow learning rate comparison
-.PHONY: summaries analysis flow_lr_analysis
+################
+# ANALYSIS     #
+################
 
-summaries: flow_lr_analysis
+.PHONY: summaries analysis flow_analysis vae_analysis vae_analysis_no_celeba
 
-analysis: flow_lr_analysis
+# Main summaries target - creates all summary files
+summaries: vae_summaries flow_summaries
 
-flow_lr_analysis: \
+# VAE Analysis targets
+vae_summaries: \
+	$(SUMMARY_DIR)/mem_mnist_lr3.npz \
+	$(SUMMARY_DIR)/mem_mnist_lr4.npz \
+	$(SUMMARY_DIR)/mem_cifar10.npz \
+	$(SUMMARY_DIR)/mem_celeba.npz
+
+vae_summaries_no_celeba: \
+	$(SUMMARY_DIR)/mem_mnist_lr3.npz \
+	$(SUMMARY_DIR)/mem_mnist_lr4.npz \
+	$(SUMMARY_DIR)/mem_cifar10.npz
+
+# Flow Analysis targets
+flow_summaries: \
 	$(SUMMARY_DIR)/mem_flow_bmnist_lr3.npz \
 	$(SUMMARY_DIR)/mem_flow_bmnist_lr4.npz
+
+flow_analysis: flow_summaries
+	@echo "Running normalizing flow analysis..."
+	python $(SCRIPT_DIR)/normalize_flow_scores.py
 
