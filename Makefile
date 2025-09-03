@@ -418,12 +418,12 @@ $(FLOW_BMNIST_LR3_CV_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
 		--latent-dim 16 \
 		--batch-size 64 \
 		--learning-rate 1e-3 \
-		--epochs 20 \
-		--repeats 5 \
+		--epochs 100 \
+		--repeats 10 \
 		--seed 42 \
 		--compute-px-every 5 \
 		--result-dir $(RESULT_DIR_FLOW_BMNIST_LR3) \
-		--checkpoint-every 50 \
+		--checkpoint-every 100 \
 		--checkpoint-dir $(CKPT_DIR_FLOW_BMNIST_LR3)
 
 $(FLOW_BMNIST_LR3_FULL_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
@@ -434,12 +434,12 @@ $(FLOW_BMNIST_LR3_FULL_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
 		--latent-dim 16 \
 		--batch-size 64 \
 		--learning-rate 1e-3 \
-		--epochs 50 \
+		--epochs 100 \
 		--repeats 1 \
 		--seed 42 \
 		--compute-px-every 5 \
 		--result-dir $(RESULT_DIR_FLOW_BMNIST_LR3) \
-		--checkpoint-every 25 \
+		--checkpoint-every 100 \
 		--checkpoint-dir $(CKPT_DIR_FLOW_BMNIST_LR3)
 
 $(FLOW_BMNIST_LR4_CV_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
@@ -450,12 +450,12 @@ $(FLOW_BMNIST_LR4_CV_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
 		--latent-dim 16 \
 		--batch-size 64 \
 		--learning-rate 1e-4 \
-		--epochs 20 \
-		--repeats 5 \
+		--epochs 100 \
+		--repeats 10 \
 		--seed 42 \
 		--compute-px-every 5 \
 		--result-dir $(RESULT_DIR_FLOW_BMNIST_LR4) \
-		--checkpoint-every 50 \
+		--checkpoint-every 100 \
 		--checkpoint-dir $(CKPT_DIR_FLOW_BMNIST_LR4)
 
 $(FLOW_BMNIST_LR4_FULL_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
@@ -466,12 +466,12 @@ $(FLOW_BMNIST_LR4_FULL_TARGETS) &: $(SCRIPT_DIR)/memorization.py $(MEM_FILES)
 		--latent-dim 16 \
 		--batch-size 64 \
 		--learning-rate 1e-4 \
-		--epochs 50 \
+		--epochs 100 \
 		--repeats 1 \
 		--seed 42 \
 		--compute-px-every 5 \
 		--result-dir $(RESULT_DIR_FLOW_BMNIST_LR4) \
-		--checkpoint-every 25 \
+		--checkpoint-every 100 \
 		--checkpoint-dir $(CKPT_DIR_FLOW_BMNIST_LR4)
 
 #################################

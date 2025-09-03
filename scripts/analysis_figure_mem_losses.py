@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Generate figure showing the evolution of the train/test loss for two models 
+Generate figure showing the evolution of the train/test loss for two models
 trained with different learning rates.
 
 Author: G.J.J. van den Burg
@@ -44,30 +44,24 @@ def parse_args():
     )
     parser.add_argument(
         "--log-scale",
-        action="store_true", 
-        help="Use log scale for y-axis (recommended for flow models with large loss values)"
+        action="store_true",
+        help="Use log scale for y-axis (recommended for flow models with large loss values)",
     )
     parser.add_argument(
         "--normalize",
         action="store_true",
-        help="Normalize loss values by dividing by the first epoch value"
+        help="Normalize loss values by dividing by the first epoch value",
     )
     parser.add_argument(
-        "--height",
-        type=str,
-        default="8cm",
-        help="Height of the plot (default: 8cm)"
+        "--height", type=str, default="8cm", help="Height of the plot (default: 8cm)"
     )
     parser.add_argument(
-        "--no-legend",
-        action="store_true",
-        help="Remove legend from the plot"
+        "--no-legend", action="store_true", help="Remove legend from the plot"
     )
     return parser.parse_args()
 
 
 def parse_full(filename: str) -> Dict[int, Dict[int, float]]:
-
     params = defaultdict(set)
     meta_keys_max = {"dataset": 1, "model": 1, "seed": 1}
 
@@ -89,50 +83,60 @@ def parse_full(filename: str) -> Dict[int, Dict[int, float]]:
     return train_loss, test_loss
 
 
-def make_tex(epochs, lr3_train, lr3_test, lr4_train, lr4_test, log_scale=False, normalize=False, height="8cm", no_legend=False):
+def make_tex(
+    epochs,
+    lr3_train,
+    lr3_test,
+    lr4_train,
+    lr4_test,
+    log_scale=False,
+    normalize=False,
+    height="8cm",
+    no_legend=False,
+):
     # Apply data transformations
     data_arrays = [lr3_train, lr3_test, lr4_train, lr4_test]
-    
+
     if normalize:
         # Normalize by dividing by the first epoch value
         for i, data in enumerate(data_arrays):
             if len(data) > 0 and data[0] != 0:
                 data_arrays[i] = [x / data[0] for x in data]
                 print(f"Normalized data {i} by first value: {data[0]:.2e}")
-    
+
     if log_scale:
         # Apply log scale (all values should be positive for loss)
         for i, data in enumerate(data_arrays):
             data_arrays[i] = [np.log(max(x, 1e-10)) for x in data]  # Avoid log(0)
         print("Applied log scale to loss data")
-    
+
     lr3_train, lr3_test, lr4_train, lr4_test = data_arrays
-    
+
     # Calculate data-driven axis limits
     all_loss_data = []
     for data in data_arrays:
         all_loss_data.extend(data)
-    
+
     y_min = min(all_loss_data)
     y_max = max(all_loss_data)
     y_range = y_max - y_min
     y_padding = 0.1 * y_range
-    
+
     # For very large ranges, use a more conservative padding
     if y_range > 1000:
         y_padding = 0.05 * y_range
-    
+
     ymin_plot = y_min - y_padding
     ymax_plot = y_max + y_padding
-    
+
     # Calculate x-axis limits based on actual epochs
     xmin_plot = min(epochs) if epochs else 0
     xmax_plot = max(epochs) + 2 if epochs else 107
-    
+
     print(f"Epoch range: [{xmin_plot}, {xmax_plot}]")
     print(f"Loss range: [{y_min:.2e}, {y_max:.2e}]")
     print(f"Plot y-range: [{ymin_plot:.2e}, {ymax_plot:.2e}]")
-    
+
     # Adjust ylabel based on transformations
     ylabel = "Loss"
     if normalize and log_scale:
@@ -178,13 +182,15 @@ def make_tex(epochs, lr3_train, lr3_test, lr4_train, lr4_test, log_scale=False, 
         "xticklabel style": {"font": fontsize},
         "yticklabel style": {"font": fontsize},
     }
-    
+
     # Add legend options only if legend is not disabled
     if not no_legend:
-        axis_opts.update({
-            "legend style": {"font": fontsize},
-            "legend cell align": "left",
-        })
+        axis_opts.update(
+            {
+                "legend style": {"font": fontsize},
+                "legend cell align": "left",
+            }
+        )
 
     tex.append(f"\\begin{{axis}}[{dict2tex(axis_opts)}]")
 
@@ -229,9 +235,7 @@ def show_plot(epochs, lr3_train, lr3_test, lr4_train, lr4_test):
         ls="--",
         label="$\eta = 10^{-3}$, test",
     )
-    plt.plot(
-        epochs, lr4_train, c="tab:orange", label="$\eta = 10^{-4}$, train"
-    )
+    plt.plot(epochs, lr4_train, c="tab:orange", label="$\eta = 10^{-4}$, train")
     plt.plot(
         epochs,
         lr4_test,
@@ -265,8 +269,17 @@ def main():
     if args.output is None:
         show_plot(epochs, lr3_train, lr3_test, lr4_train, lr4_test)
     else:
-        tex = make_tex(epochs, lr3_train, lr3_test, lr4_train, lr4_test, 
-                      args.log_scale, args.normalize, args.height, args.no_legend)
+        tex = make_tex(
+            epochs,
+            lr3_train,
+            lr3_test,
+            lr4_train,
+            lr4_test,
+            args.log_scale,
+            args.normalize,
+            args.height,
+            args.no_legend,
+        )
         with open(args.output, "w") as fp:
             fp.write("\n".join(tex))
 
