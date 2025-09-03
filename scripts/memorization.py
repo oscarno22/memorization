@@ -449,8 +449,10 @@ def main():
         trainer_params=trainer_params,
         num_feature=num_feature,
     )
+    
+    def parse_tup(s: str) -> list[int]:
+        return list(map(int, s.strip("()").split(",")))
 
-    parse_tup = lambda s: list(map(int, s.strip("()").split(",")))
     start_at = parse_tup(args.start_at)
     stop_after = parse_tup(args.stop_after) if args.stop_after else None
 

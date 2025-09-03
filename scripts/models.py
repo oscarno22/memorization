@@ -64,9 +64,7 @@ class BaseVAE(BaseModel):
         """z is expected to be of shape (batch_size, latent_dim)"""
         return self._decoder(z)
 
-    def reparameterize(
-        self, mu: torch.Tensor, logvar: torch.Tensor
-    ) -> torch.Tensor:
+    def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
@@ -156,9 +154,7 @@ class DiagonalGaussianMixin:
         )
         return logpx_pixel
 
-    def log_pxz_logit(
-        self, Y: torch.Tensor, true: torch.Tensor
-    ) -> torch.Tensor:
+    def log_pxz_logit(self, Y: torch.Tensor, true: torch.Tensor) -> torch.Tensor:
         """Log p(x | z) for Gaussian decoder with diagonal cov. (logit space)"""
         # Both the data and the model pretend that they're in logit space
         # To get bits per dim, see eq (27) of
@@ -170,9 +166,7 @@ class DiagonalGaussianMixin:
         logvar_theta = Y[:, C:, :, :]
         logvar_theta = torch.clamp(logvar_theta, min=-7.0)
         inv_std = torch.exp(-0.5 * logvar_theta)
-        SSE = torch.sum(
-            torch.square(inv_std * (true - mu_theta)), axis=(1, 2, 3)
-        )
+        SSE = torch.sum(torch.square(inv_std * (true - mu_theta)), axis=(1, 2, 3))
         out = -0.5 * (
             D * math.log(2 * math.pi) + logvar_theta.sum(axis=(1, 2, 3)) + SSE
         )
@@ -217,9 +211,7 @@ class ConstantGaussianMixin:
         )
         return logpx_pixel
 
-    def log_pxz_logit(
-        self, Y: torch.Tensor, true: torch.Tensor
-    ) -> torch.Tensor:
+    def log_pxz_logit(self, Y: torch.Tensor, true: torch.Tensor) -> torch.Tensor:
         """Log p(x | z) for Gaussian decoder with learned constant diagonal
         cov.  (logit space)"""
         # Both the data and the model pretend that they're in logit space
@@ -228,9 +220,7 @@ class ConstantGaussianMixin:
         D = self._in_channels * self._img_dim * self._img_dim
         mu_theta = Y
         inv_gamma = torch.exp(-self.loggamma)
-        SSE = torch.sum(
-            inv_gamma * torch.square(true - mu_theta), axis=(1, 2, 3)
-        )
+        SSE = torch.sum(inv_gamma * torch.square(true - mu_theta), axis=(1, 2, 3))
         out = -0.5 * (D * math.log(2 * math.pi) + D * self.loggamma + SSE)
         return out
 
@@ -291,9 +281,7 @@ class MixLogisticsMixin:
         mean_r = means[:, 0, :, :, :]  #                B, 1, K, H, W
         mean_g = means[:, 1, :, :, :] + alpha * X[:, 0, :, :, :]
         mean_b = (
-            means[:, 2, :, :, :]
-            + beta * X[:, 0, :, :, :]
-            + gamma * X[:, 1, :, :, :]
+            means[:, 2, :, :, :] + beta * X[:, 0, :, :, :] + gamma * X[:, 1, :, :, :]
         )
 
         # Combine means
@@ -370,7 +358,6 @@ class MixLogisticsMixin:
 
 
 class BernoulliMLPVAE(BernoulliMixin, BaseVAE):
-
     _layers = [512, 256]
 
     def __init__(
@@ -503,7 +490,6 @@ class BernoulliDCVAE(BernoulliMixin, BaseVAE):
 
 
 class MixLogisticsDCVAE(MixLogisticsMixin, BaseVAE):
-
     def __init__(
         self,
         img_dim: int = 32,
@@ -737,24 +723,68 @@ class ConstantGaussianDCVAE(ConstantGaussianMixin, BaseVAE):
         )
 
 
+class ActNorm1d(nn.Module):
+    """Activation Normalization (per-feature) with log-det.
+    Initialized on first batch to have zero mean and unit variance.
+    After that parameters are fixed (learnable like in Glow variant).
+    """
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.dim = dim
+        self.eps = eps
+        self.bias = nn.Parameter(torch.zeros(dim))
+        self.log_scale = nn.Parameter(torch.zeros(dim))
+        self.register_buffer("_initialized", torch.tensor(0, dtype=torch.uint8))
+
+    def initialize(self, x: torch.Tensor):
+        # x: (B, D)
+        with torch.no_grad():
+            mean = x.mean(0)
+            std = x.std(0) + self.eps
+            self.bias.data.copy_(mean)
+            self.log_scale.data.copy_(torch.log(1.0 / std))
+            self._initialized.data.fill_(1)
+
+    def forward(self, x: torch.Tensor):
+        if self._initialized.item() == 0:
+            self.initialize(x)
+        y = (x - self.bias) * torch.exp(self.log_scale)
+        log_det = torch.sum(self.log_scale) * torch.ones(x.size(0), device=x.device)
+        return y, log_det
+
+    def inverse(self, y: torch.Tensor):
+        x = y * torch.exp(-self.log_scale) + self.bias
+        log_det = -torch.sum(self.log_scale) * torch.ones(y.size(0), device=y.device)
+        return x, log_det
+
+
 class SimpleRealNVP(BaseModel):
     """
-    Lightweight Real NVP normalizing flow model for 2D data.
-    This is a simplified implementation that works with flattened image data.
-    Adapted to work with the existing VAE-based training framework.
+    Lightweight Real NVP normalizing flow model for image data (flattened).
+    Differences vs previous version:
+    - Removes BatchNorm1d (previously missing log-det contribution)
+    - Adds ActNorm1d layers with proper log-det accounting
+    - Centralizes forward/inverse transforms (flow_forward / flow_inverse)
+    - Correct log_prob computation (base log prob + total log-det)
+    NOTE: description kept stable to satisfy Makefile target patterns.
     """
+
     def __init__(
         self,
         img_dim: int = 32,
-        latent_dim: int = None,  # Not used for flows, but kept for compatibility
+        latent_dim: int = None,  # compatibility argument (unused)
         in_channels: int = 1,
         num_layers: int = 4,
         hidden_dim: int = 256,
+        num_feature: int = None,  # mapped to hidden_dim if provided via loader
         **kwargs,
     ):
         super().__init__()
         self._img_dim = img_dim
         self._in_channels = in_channels
+        if num_feature is not None:
+            hidden_dim = num_feature  # allow reuse of --num-feature flag
         self._num_layers = num_layers
         self._hidden_dim = hidden_dim
         self._data_dim = img_dim * img_dim * in_channels
@@ -762,28 +792,26 @@ class SimpleRealNVP(BaseModel):
 
     @property
     def description(self):
+        # Keep original naming convention expected by Makefile
         return f"{self.__class__.__name__}_L{self._num_layers}-H{self._hidden_dim}"
 
     @property
     def latent_dim(self):
-        return self._data_dim  # For flows, latent = data dimension
+        return self._data_dim  # flows: latent dimension equals data dimension
 
+    # ---------------- Flow construction ----------------
     def construct_model(self):
-        """Create coupling layers for Real NVP"""
-        self.coupling_layers = nn.ModuleList()
-        self.batch_norms = nn.ModuleList()
-        
+        self.masks = []
+        self.coupling_nets = nn.ModuleList()
+        self.actnorms = nn.ModuleList()
         for i in range(self._num_layers):
-            # Alternating masks
             mask = self._create_mask(i % 2)
-            coupling_net = self._create_coupling_network()
-            self.coupling_layers.append(coupling_net)
-            self.batch_norms.append(nn.BatchNorm1d(self._data_dim))
-            # Store mask as buffer (not a parameter)
-            self.register_buffer(f'mask_{i}', mask)
+            self.register_buffer(f"mask_{i}", mask)
+            self.masks.append(mask)
+            self.coupling_nets.append(self._create_coupling_network())
+            self.actnorms.append(ActNorm1d(self._data_dim))
 
     def _create_mask(self, reverse: bool = False):
-        """Create alternating binary mask"""
         mask = torch.zeros(self._data_dim)
         if reverse:
             mask[::2] = 1
@@ -792,123 +820,102 @@ class SimpleRealNVP(BaseModel):
         return mask
 
     def _create_coupling_network(self):
-        """Create the s and t networks for coupling layer"""
         return nn.Sequential(
             nn.Linear(self._data_dim, self._hidden_dim),
             nn.ReLU(),
             nn.Linear(self._hidden_dim, self._hidden_dim),
             nn.ReLU(),
-            nn.Linear(self._hidden_dim, self._data_dim * 2)  # s and t
+            nn.Linear(self._hidden_dim, self._data_dim * 2),  # outputs s and t
         )
 
-    def _coupling_forward(self, x, coupling_net, mask):
-        """Forward pass through one coupling layer"""
+    # --------------- Forward / Inverse transforms ---------------
+    def _coupling_forward(self, x, net, mask):
         masked_x = x * mask
-        st = coupling_net(masked_x)
+        st = net(masked_x)
         s, t = st.chunk(2, dim=1)
-        s = torch.tanh(s)  # Stabilize scaling
-        
-        # Apply transformation
-        x_new = mask * x + (1 - mask) * (x * torch.exp(s) + t)
-        log_det = torch.sum((1 - mask) * s, dim=1)
-        return x_new, log_det
+        s = torch.tanh(s)  # stabilize
+        inv_mask = 1 - mask
+        y = masked_x + inv_mask * (x * torch.exp(s) + t)
+        log_det = torch.sum(inv_mask * s, dim=1)
+        return y, log_det
 
-    def _coupling_inverse(self, z, coupling_net, mask):
-        """Inverse pass through one coupling layer"""
-        masked_z = z * mask
-        st = coupling_net(masked_z)
+    def _coupling_inverse(self, y, net, mask):
+        masked_y = y * mask
+        st = net(masked_y)
         s, t = st.chunk(2, dim=1)
         s = torch.tanh(s)
-        
-        # Inverse transformation
-        z_new = mask * z + (1 - mask) * (z - t) * torch.exp(-s)
-        log_det = -torch.sum((1 - mask) * s, dim=1)
-        return z_new, log_det
+        inv_mask = 1 - mask
+        # invert: x_unmasked = (y_unmasked - t)*exp(-s)
+        y_unmasked = y * inv_mask
+        x_unmasked = (y_unmasked - t) * torch.exp(-s)
+        x = masked_y + inv_mask * x_unmasked
+        log_det = -torch.sum(inv_mask * s, dim=1)
+        return x, log_det
 
+    def flow_forward(self, x: torch.Tensor):
+        B = x.size(0)
+        z = x.view(B, -1)
+        total_log_det = torch.zeros(B, device=x.device)
+        for i, (net, act) in enumerate(zip(self.coupling_nets, self.actnorms)):
+            mask = getattr(self, f"mask_{i}")
+            z, log_det_c = self._coupling_forward(z, net, mask)
+            z, log_det_a = act(z)
+            total_log_det += log_det_c + log_det_a
+        return z, total_log_det
+
+    def flow_inverse(self, z: torch.Tensor):
+        B = z.size(0)
+        x = z
+        total_log_det = torch.zeros(B, device=z.device)
+        for i in reversed(range(self._num_layers)):
+            act = self.actnorms[i]
+            net = self.coupling_nets[i]
+            mask = getattr(self, f"mask_{i}")
+            x, log_det_a = act.inverse(x)
+            x, log_det_c = self._coupling_inverse(x, net, mask)
+            total_log_det += log_det_a + log_det_c
+        return x.view(B, self._in_channels, self._img_dim, self._img_dim), total_log_det
+
+    # --------------- Public API (compatibility) ---------------
     def forward(self, x):
-        """Forward pass: data -> latent (VAE compatibility)"""
-        batch_size = x.shape[0]
-        x_flat = x.view(batch_size, -1)  # Flatten
-        
-        log_det_sum = torch.zeros(batch_size, device=x.device)
-        
-        for i, (coupling_layer, batch_norm) in enumerate(zip(self.coupling_layers, self.batch_norms)):
-            mask = getattr(self, f'mask_{i}')
-            x_flat, log_det = self._coupling_forward(x_flat, coupling_layer, mask)
-            log_det_sum += log_det
-            x_flat = batch_norm(x_flat)
-            
-        # For VAE compatibility, return z, dummy mu, dummy logvar
-        dummy_mu = torch.zeros_like(x_flat)
-        dummy_logvar = torch.zeros_like(x_flat)
-        return x_flat.view_as(x), dummy_mu, dummy_logvar
+        # For trainer compatibility (returns dummy mu/logvar like VAE)
+        z, _ = self.flow_forward(x)
+        return x, torch.zeros_like(z), torch.zeros_like(z)
 
-    def encode(self, x):
-        """VAE-style encode method - returns dummy values since flow doesn't separate encode/decode"""
-        batch_size = x.shape[0]
-        dummy_mu = torch.zeros(batch_size, self._data_dim, device=x.device)
-        dummy_logvar = torch.zeros(batch_size, self._data_dim, device=x.device)
+    def encode(self, x):  # not meaningful for flow
+        B = x.size(0)
+        dummy_mu = torch.zeros(B, self._data_dim, device=x.device)
+        dummy_logvar = torch.zeros(B, self._data_dim, device=x.device)
         return dummy_mu, dummy_logvar
 
-    def decode(self, z):
-        """VAE-style decode method - for flows this is the inverse transformation"""
-        batch_size = z.shape[0]
-        # For simplicity, return identity - this won't be used for memorization anyway
-        return z.view(batch_size, self._in_channels, self._img_dim, self._img_dim)
-
-    def log_pxz(self, pred: torch.Tensor, true: torch.Tensor) -> torch.Tensor:
-        """VAE compatibility - compute log p(x|z) - for flows this is the full log prob"""
-        return self.log_prob(true)
+    def decode(self, z):  # inverse transform for compatibility
+        x, _ = self.flow_inverse(z.view(-1, self._data_dim))
+        return x
 
     def log_prob(self, x):
-        """Compute log probability of data under the flow"""
-        batch_size = x.shape[0]
-        x_flat = x.view(batch_size, -1)  # Flatten
-        
-        log_det_sum = torch.zeros(batch_size, device=x.device)
-        z = x_flat
-        
-        for i, (coupling_layer, batch_norm) in enumerate(zip(self.coupling_layers, self.batch_norms)):
-            mask = getattr(self, f'mask_{i}')
-            z, log_det = self._coupling_forward(z, coupling_layer, mask)
-            log_det_sum += log_det
-            z = batch_norm(z)
-        
-        # Log probability under standard normal base distribution
-        log_pz = -0.5 * torch.sum(z**2, dim=1) - 0.5 * self._data_dim * math.log(2 * math.pi)
-        
-        # Add log determinant of transformation
-        log_px = log_pz + log_det_sum
-        return log_px
+        z, log_det = self.flow_forward(x)
+        log_pz = -0.5 * torch.sum(z**2, dim=1) - 0.5 * self._data_dim * math.log(
+            2 * math.pi
+        )
+        return log_pz + log_det
+
+    def log_pxz(self, pred: torch.Tensor, true: torch.Tensor) -> torch.Tensor:
+        # For flow: full log likelihood
+        return self.log_prob(true)
 
     def sample(self, num_samples: int):
-        """Sample from the model"""
         with torch.no_grad():
-            # Sample from standard normal
             z = torch.randn(num_samples, self._data_dim, device=self.device)
-            
-            # Go through layers in reverse to get data samples
-            for i in reversed(range(self._num_layers)):
-                # Note: batch norm inverse is approximate here
-                mask = getattr(self, f'mask_{i}')
-                z, _ = self._coupling_inverse(z, self.coupling_layers[i], mask)
-            
-            # Reshape back to image format
-            x = z.view(num_samples, self._in_channels, self._img_dim, self._img_dim)
+            x, _ = self.flow_inverse(z)
             return x
 
     def step(self, batch: torch.Tensor):
-        """Training step - compute negative log likelihood"""
-        log_prob = self.log_prob(batch)
-        loss = -torch.mean(log_prob)
-        return loss
+        return -self.log_prob(batch).mean()
 
     def loss_function(self, *args, **kwargs):
-        """For VAE compatibility with trainer"""
         return self.step(args[0])
 
     def marginal_batch_flow(self, batch: torch.Tensor, N: int = 256) -> torch.Tensor:
-        """Special marginal computation for flows - just return the log probability directly"""
         return self.log_prob(batch)
 
 
